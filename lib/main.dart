@@ -14,7 +14,7 @@ const brandGreen = Color(0xFF005A2B);
 const brandLight = Color(0xFFE6F2EC);
 const gstRate = 0.09; // prices INCLUDE GST
 const cats = ['Hidang', 'Set', 'Desserts', 'Drinks'];
-const orderModes = ['Dine in', 'Takeaway', 'RSVP'];
+const orderModes = ['Dine in', 'Takeaway', 'Delivery', 'Catering'];
 const payMethods = ['PayNow', 'Cash', 'Card', 'Unpaid'];
 const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -29,9 +29,12 @@ Future<T?> go<T>(BuildContext c, Widget w) =>
 final cfg = <String, String>{
   'ip': '192.168.1.50',
   'port': '9100',
+  'cols': '42',
+  'autoPrint': 'true',
   'company': 'HJH MAIMUNAH RESTAURANT PTE LTD',
   'uen': '199705733D',
   'gstNo': '',
+  'defaultDelivery': '0',
   'address': '',
   'phone': '',
   'menuUrl': '', // paste the Google Sheet "Publish to web > CSV" link here
@@ -88,13 +91,16 @@ class Item {
         tL = null,
         available = true;
 
-  double? priceFor(String s, bool dine) =>
-      s == 'M' ? (dine ? dM : tM) : s == 'L' ? (dine ? dL : tL) : price;
+  double? priceFor(String s, bool dine) => s == 'M'
+      ? (dine ? (dM ?? tM) : (tM ?? dM))
+      : s == 'L'
+          ? (dine ? (dL ?? tL) : (tL ?? dL))
+          : price;
 
   List<String> sizes(bool dine) => [
         if (price != null) 'Std',
-        if ((dine ? dM : tM) != null) 'M',
-        if ((dine ? dL : tL) != null) 'L',
+        if (priceFor('M', dine) != null) 'M',
+        if (priceFor('L', dine) != null) 'L',
       ];
 }
 
@@ -143,11 +149,13 @@ class Order {
       payMethod = 'PayNow';
   DateTime date = DateTime.now();
   int pax = 2;
+  double deliveryFee = 0.0;
   double discount = 0.0;
   double deposit = 0.0;
   final Map<String, Line> lines = {};
 
-  bool get dineIn => mode != 'Takeaway';
+  bool get dineIn => mode == 'Dine in';
+  bool get isDeliveryOrCatering => mode == 'Delivery' || mode == 'Catering';
 
   int qty(Item i, String s) => lines['${i.id}|$s']?.qty ?? 0;
 
@@ -161,7 +169,8 @@ class Order {
 
   double get rawTotal =>
       lines.values.fold(0.0, (a, l) => a + l.unit(dineIn) * l.qty);
-  double get total => (rawTotal - discount).clamp(0.0, double.infinity);
+  double get total =>
+      (rawTotal + deliveryFee - discount).clamp(0.0, double.infinity);
   double get gst =>
       double.parse((total * gstRate / (1 + gstRate)).toStringAsFixed(2));
   double get balanceDue => (total - deposit).clamp(0.0, double.infinity);
@@ -181,6 +190,7 @@ class Order {
         'date': date.toIso8601String(),
         'pax': pax,
         'dineIn': dineIn,
+        'deliveryFee': deliveryFee,
         'discount': discount,
         'deposit': deposit,
         'lines': lines.values
@@ -197,6 +207,11 @@ class Order {
 
   static Order fromJson(Map<String, dynamic> j) {
     final bool legacyDine = j['dineIn'] ?? true;
+    String loadedMode =
+        (j['mode'] ?? (legacyDine ? 'Dine in' : 'Takeaway')).toString();
+    if (!orderModes.contains(loadedMode)) {
+      loadedMode = 'Catering';
+    }
     final o = Order()
       ..inv = (j['inv'] ?? '').toString()
       ..name = (j['name'] ?? '').toString()
@@ -204,10 +219,11 @@ class Order {
       ..table = (j['table'] ?? '').toString()
       ..time = (j['time'] ?? '12:30').toString()
       ..notes = (j['notes'] ?? '').toString()
-      ..mode = (j['mode'] ?? (legacyDine ? 'Dine in' : 'Takeaway')).toString()
+      ..mode = loadedMode
       ..payMethod = (j['payMethod'] ?? 'PayNow').toString()
       ..date = DateTime.tryParse((j['date'] ?? '').toString()) ?? DateTime.now()
       ..pax = (j['pax'] is int) ? j['pax'] as int : int.tryParse('${j['pax']}') ?? 2
+      ..deliveryFee = _d(j['deliveryFee']) ?? 0.0
       ..discount = _d(j['discount']) ?? 0.0
       ..deposit = _d(j['deposit']) ?? 0.0;
 
@@ -281,28 +297,37 @@ Future<void> deleteOrder(String inv) async {
   await p.setStringList('orders', rawList);
 }
 
-// ---------- 80mm receipt & KOT (ESC/POS over LAN, port 9100) ----------
-const W = 42; // use 48 if your printer prints 48 columns
-String lr(String a, String b) =>
-    (a.length > W - b.length - 1 ? a.substring(0, W - b.length - 1) : a)
-        .padRight(W - b.length) +
-    b;
-String ctr(String s) => ' ' * (((W - s.length) / 2).floor().clamp(0, W)) + s;
+// ---------- 80mm receipt (ESC/POS over LAN, port 9100) ----------
+int get printWidth => int.tryParse(cfg['cols'] ?? '42') ?? 42;
+
+String lr(String a, String b) {
+  final w = printWidth;
+  final maxLeft = (w - b.length - 1).clamp(1, w);
+  return (a.length > maxLeft ? a.substring(0, maxLeft) : a).padRight(w - b.length) + b;
+}
+
+String ctr(String s) {
+  final w = printWidth;
+  return ' ' * (((w - s.length) / 2).floor().clamp(0, w)) + s;
+}
 
 List<(String, bool)> receiptLines(Order o) {
+  final w = printWidth;
+  final locLabel = o.isDeliveryOrCatering ? 'Addr' : 'Table';
   final L = <(String, bool)>[
     (ctr(cfg['company']!), true),
     (ctr(cfg['address']!.isEmpty ? '[Address]' : cfg['address']!), false),
     (ctr('Tel: ${cfg['phone']!.isEmpty ? '[Phone]' : cfg['phone']}'), false),
     (ctr('UEN: ${cfg['uen']}'), false),
     (ctr('GST Reg: ${cfg['gstNo']!.isEmpty ? '[GST No.]' : cfg['gstNo']}'), false),
-    ('-' * W, false),
+    ('-' * w, false),
     ('TAX INVOICE  ${o.inv}', true),
     ('Date: ${fmtDate(o.date)} ${o.time}', false),
-    ('Table: ${o.table.isEmpty ? '-' : o.table} | ${o.mode} | Pax ${o.pax}', true),
+    ('${o.mode} | Pax ${o.pax}', true),
+    if (o.table.trim().isNotEmpty) ('$locLabel: ${o.table.trim()}', false),
     ('Cust: ${o.name} (${o.mobile})', false),
-    if (o.notes.trim().isNotEmpty) ('Note: ${o.notes.trim()}', false),
-    ('-' * W, false),
+    if (o.notes.trim().isNotEmpty) ('Remarks: ${o.notes.trim()}', false),
+    ('-' * w, false),
   ];
   for (final c in cats) {
     final ls = o.lines.values.where((l) => l.item.cat == c).toList();
@@ -314,9 +339,11 @@ List<(String, bool)> receiptLines(Order o) {
     }
   }
   L.addAll([
-    ('-' * W, false),
-    (lr('Subtotal (excl. GST)', f(o.total - o.gst)), false),
+    ('-' * w, false),
+    (lr('Items Subtotal', f(o.rawTotal)), false),
+    if (o.deliveryFee > 0) (lr('Delivery Charge', f(o.deliveryFee)), false),
     if (o.discount > 0) (lr('Discount', '-${f(o.discount)}'), false),
+    (lr('Subtotal (excl. GST)', f(o.total - o.gst)), false),
     (lr('GST 9% (included)', f(o.gst)), false),
     (lr('TOTAL (SGD)', f(o.total)), true),
     if (o.deposit > 0) (lr('Deposit Paid (${o.payMethod})', '-${f(o.deposit)}'), false),
@@ -324,58 +351,26 @@ List<(String, bool)> receiptLines(Order o) {
       (lr('BALANCE DUE', f(o.balanceDue)), true)
     else
       (lr('Paid via ${o.payMethod}', f(o.total)), false),
-    ('-' * W, false),
+    ('-' * w, false),
     ('', false),
     (ctr('Thank you! Terima kasih!'), false),
   ]);
   return L;
 }
 
-List<(String, bool)> kotLines(Order o) {
-  final L = <(String, bool)>[
-    (ctr('*** KITCHEN ORDER TICKET ***'), true),
-    (ctr('TABLE: ${o.table.isEmpty ? 'N/A' : o.table}'), true),
-    (ctr('${o.mode.toUpperCase()} | PAX: ${o.pax} | ${o.time}'), true),
-    ('-' * W, false),
-    ('Order: ${o.inv}', false),
-    ('Cust: ${o.name} (${fmtDate(o.date)})', false),
-    if (o.notes.trim().isNotEmpty) ...[
-      ('-' * W, false),
-      ('REMARKS: ${o.notes.trim().toUpperCase()}', true),
-    ],
-    ('-' * W, false),
-  ];
-  for (final c in cats) {
-    final ls = o.lines.values.where((l) => l.item.cat == c).toList();
-    if (ls.isEmpty) continue;
-    L.add(('[ ${c.toUpperCase()} ]', true));
-    for (final l in ls) {
-      L.add(('  ${l.qty}x  ${lname(l)}', true));
-    }
-    L.add(('', false));
-  }
-  L.add(('-' * W, false));
-  return L;
-}
-
-Future<void> _sendEscPos(List<(String, bool)> lines, {bool largeItems = false}) async {
+Future<void> printLan(Order o) async {
   final s = await Socket.connect(
     cfg['ip']!,
     int.parse(cfg['port']!),
     timeout: const Duration(seconds: 5),
   );
   final b = BytesBuilder()..add([0x1b, 0x40]);
-  for (final (t, bold) in lines) {
+  for (final (t, bold) in receiptLines(o)) {
     b.add([0x1b, 0x45, bold ? 1 : 0]);
-    if (largeItems && bold) {
-      b.add([0x1d, 0x21, 0x01]); // slightly taller font for KOT bold lines
-    } else {
-      b.add([0x1d, 0x21, 0x00]);
-    }
     b.add(latin1.encode(t.replaceAll(RegExp(r'[^\x00-\x7F]'), '?')));
     b.add([0x0a]);
   }
-  b.add([0x1d, 0x21, 0x00, 0x0a, 0x0a, 0x0a, 0x1d, 0x56, 0x42, 0x00]);
+  b.add([0x0a, 0x0a, 0x0a, 0x1d, 0x56, 0x42, 0x00]);
   s.add(b.takeBytes());
   await s.flush();
   await s.close();
@@ -383,16 +378,7 @@ Future<void> _sendEscPos(List<(String, bool)> lines, {bool largeItems = false}) 
 
 Future<String?> tryPrint(Order o) async {
   try {
-    await _sendEscPos(receiptLines(o));
-    return null;
-  } catch (e) {
-    return e.toString();
-  }
-}
-
-Future<String?> tryPrintKot(Order o) async {
-  try {
-    await _sendEscPos(kotLines(o), largeItems: true);
+    await printLan(o);
     return null;
   } catch (e) {
     return e.toString();
@@ -413,6 +399,7 @@ Future<void> shareInvoice(Order o) async {
       ]);
     }
   }
+  final locLabel = o.isDeliveryOrCatering ? 'Address' : 'Table';
   d.addPage(
     pw.Page(
       pageFormat: PdfPageFormat.a4,
@@ -437,7 +424,7 @@ Future<void> shareInvoice(Order o) async {
             style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
           ),
           pw.Text(
-            '${fmtDate(o.date)} ${o.time}  |  Table: ${o.table.isEmpty ? '-' : o.table}  |  ${o.mode}  |  Pax ${o.pax}',
+            '${fmtDate(o.date)} ${o.time}  |  ${o.mode}  |  Pax ${o.pax}${o.table.trim().isEmpty ? '' : '  |  $locLabel: ${o.table.trim()}'}',
           ),
           pw.Text('Billed to: ${o.name}  ${o.mobile}'),
           if (o.notes.trim().isNotEmpty)
@@ -465,8 +452,11 @@ Future<void> shareInvoice(Order o) async {
             child: pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.end,
               children: [
-                pw.Text('Subtotal (excl. GST): \$${f(o.total - o.gst)}'),
+                pw.Text('Items Subtotal: \$${f(o.rawTotal)}'),
+                if (o.deliveryFee > 0)
+                  pw.Text('Delivery Charge: +\$${f(o.deliveryFee)}'),
                 if (o.discount > 0) pw.Text('Discount: -\$${f(o.discount)}'),
+                pw.Text('Subtotal (excl. GST): \$${f(o.total - o.gst)}'),
                 pw.Text('GST 9% (included): \$${f(o.gst)}'),
                 pw.Text(
                   'TOTAL (SGD): \$${f(o.total)}',
@@ -524,7 +514,7 @@ void main() async {
   );
 }
 
-// ---------- Screen 1: Customer & Table Setup ----------
+// ---------- Screen 1: Customer, Order Type & Quick Pax Setup ----------
 class CustomerScreen extends StatefulWidget {
   final Order? existingOrder;
   const CustomerScreen({super.key, this.existingOrder});
@@ -534,7 +524,7 @@ class CustomerScreen extends StatefulWidget {
 
 class _CustomerState extends State<CustomerScreen> {
   late final Order o;
-  late final TextEditingController n, m, tbl, notesCtl;
+  late final TextEditingController n, m, tbl, notesCtl, paxCtl;
 
   @override
   void initState() {
@@ -544,6 +534,18 @@ class _CustomerState extends State<CustomerScreen> {
     m = TextEditingController(text: o.mobile);
     tbl = TextEditingController(text: o.table);
     notesCtl = TextEditingController(text: o.notes);
+    paxCtl = TextEditingController(text: '${o.pax}');
+  }
+
+  void setPaxValue(int val) {
+    final clamped = val < 1 ? 1 : val;
+    setState(() {
+      o.pax = clamped;
+      paxCtl.text = '$clamped';
+      paxCtl.selection = TextSelection.fromPosition(
+        TextPosition(offset: paxCtl.text.length),
+      );
+    });
   }
 
   void addQuickNote(String tag) {
@@ -580,7 +582,7 @@ class _CustomerState extends State<CustomerScreen> {
             onPressed: () => go(c, const HistoryScreen()),
           ),
           IconButton(
-            tooltip: 'Settings',
+            tooltip: 'App & Printer Settings',
             icon: const Icon(Icons.settings),
             onPressed: () => go(c, const SettingsScreen()),
           ),
@@ -589,13 +591,25 @@ class _CustomerState extends State<CustomerScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // 4 Order Types: Dine in | Takeaway | Delivery | Catering
           SegmentedButton<String>(
+            showSelectedIcon: false,
             segments: [
               for (final mode in orderModes)
-                ButtonSegment(value: mode, label: Text(mode)),
+                ButtonSegment(
+                  value: mode,
+                  label: Text(mode, style: const TextStyle(fontSize: 12)),
+                ),
             ],
             selected: {o.mode},
-            onSelectionChanged: (s) => setState(() => o.mode = s.first),
+            onSelectionChanged: (s) {
+              setState(() {
+                o.mode = s.first;
+                if (o.isDeliveryOrCatering && o.deliveryFee == 0) {
+                  o.deliveryFee = _d(cfg['defaultDelivery']) ?? 0.0;
+                }
+              });
+            },
           ),
           const SizedBox(height: 14),
           Row(
@@ -630,7 +644,7 @@ class _CustomerState extends State<CustomerScreen> {
                   onTap: pickTime,
                   child: InputDecorator(
                     decoration: const InputDecoration(
-                      labelText: 'Time / Slot',
+                      labelText: 'Time',
                       border: OutlineInputBorder(),
                       suffixIcon: Icon(Icons.access_time, size: 18),
                     ),
@@ -644,50 +658,110 @@ class _CustomerState extends State<CustomerScreen> {
             ],
           ),
           const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: tbl,
-                  decoration: const InputDecoration(
-                    labelText: 'Table No. (e.g. T-12 / VIP)',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.shade400),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
+
+          // Quick Pax Input Card
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: brandLight.withValues(alpha: 0.5),
+              border: Border.all(color: brandGreen.withValues(alpha: 0.4)),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   children: [
-                    const Text('Pax ', style: TextStyle(fontSize: 14)),
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      onPressed: () =>
-                          setState(() => o.pax = o.pax > 1 ? o.pax - 1 : 1),
-                      icon: const Icon(Icons.remove_circle_outline),
-                    ),
-                    Text(
-                      '${o.pax}',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
+                    const Expanded(
+                      child: Text(
+                        'Pax (Type directly or tap quick buttons)',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: brandGreen,
+                          fontSize: 13,
+                        ),
                       ),
                     ),
-                    IconButton(
+                    IconButton.outlined(
                       visualDensity: VisualDensity.compact,
-                      onPressed: () => setState(() => o.pax++),
-                      icon: const Icon(Icons.add_circle, color: brandGreen),
+                      onPressed: () => setPaxValue(o.pax - 1),
+                      icon: const Icon(Icons.remove),
+                    ),
+                    const SizedBox(width: 6),
+                    SizedBox(
+                      width: 72,
+                      child: TextField(
+                        controller: paxCtl,
+                        keyboardType: TextInputType.number,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        decoration: InputDecoration(
+                          isDense: true,
+                          filled: true,
+                          fillColor: Colors.white,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 8,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        onChanged: (v) {
+                          final parsed = int.tryParse(v.trim());
+                          if (parsed != null && parsed > 0) {
+                            o.pax = parsed;
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    IconButton.filled(
+                      visualDensity: VisualDensity.compact,
+                      style: IconButton.styleFrom(backgroundColor: brandGreen),
+                      onPressed: () => setPaxValue(o.pax + 1),
+                      icon: const Icon(Icons.add, color: Colors.white),
                     ),
                   ],
                 ),
-              ),
-            ],
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final preset in [2, 4, 6, 10, 20, 30, 50, 100])
+                      ChoiceChip(
+                        label: Text(
+                          '$preset',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        selected: o.pax == preset,
+                        selectedColor: brandGreen,
+                        labelStyle: TextStyle(
+                          color: o.pax == preset ? Colors.white : brandGreen,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        visualDensity: VisualDensity.compact,
+                        onSelected: (_) => setPaxValue(preset),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          TextField(
+            controller: tbl,
+            decoration: InputDecoration(
+              labelText: o.isDeliveryOrCatering
+                  ? 'Delivery / Catering Address'
+                  : 'Table No. (e.g. T-12)',
+              border: const OutlineInputBorder(),
+            ),
           ),
           const SizedBox(height: 14),
           Row(
@@ -719,8 +793,8 @@ class _CustomerState extends State<CustomerScreen> {
             controller: notesCtl,
             maxLines: 2,
             decoration: const InputDecoration(
-              labelText: 'Kitchen / Dietary Remarks (prints on KOT & Invoice)',
-              hintText: 'e.g. Less spicy, separate gravy, no peanuts',
+              labelText: 'Order / Delivery Remarks',
+              hintText: 'e.g. Less spicy, separate gravy, call on arrival',
               border: OutlineInputBorder(),
             ),
           ),
@@ -733,8 +807,7 @@ class _CustomerState extends State<CustomerScreen> {
                 'Less Spicy',
                 'Separate Gravy',
                 'No Peanuts',
-                'VIP Table',
-                'Serve Together',
+                'Call on Arrival',
               ])
                 ActionChip(
                   backgroundColor: brandLight,
@@ -749,8 +822,14 @@ class _CustomerState extends State<CustomerScreen> {
           const SizedBox(height: 24),
           FilledButton.icon(
             icon: const Icon(Icons.restaurant_menu),
-            label: Text(isEdit ? 'Continue to Menu (${o.count} items)' : 'Next: Choose Menu'),
+            label: Text(
+              isEdit
+                  ? 'Continue to Menu (${o.count} items)'
+                  : 'Next: Choose Menu',
+            ),
             onPressed: () {
+              final typedPax = int.tryParse(paxCtl.text.trim());
+              if (typedPax != null && typedPax > 0) o.pax = typedPax;
               o.name = n.text.trim();
               o.mobile = m.text.trim();
               o.table = tbl.text.trim();
@@ -764,7 +843,7 @@ class _CustomerState extends State<CustomerScreen> {
   }
 }
 
-// ---------- Screen 2: Menu with Search, Subcategory Chips & Custom Item ----------
+// ---------- Screen 2: Menu with Quick Quantity Input, Search & Custom Item ----------
 class MenuScreen extends StatefulWidget {
   final Order o;
   const MenuScreen(this.o, {super.key});
@@ -779,9 +858,103 @@ class _MenuState extends State<MenuScreen> {
   String query = '';
   final selectedSub = <String, String>{for (final c in cats) c: 'All'};
 
+  Future<void> showQuickQtyDialog(Item item, String size) async {
+    final current = o.qty(item, size);
+    final qtyCtl = TextEditingController(text: current > 0 ? '$current' : '');
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(
+          '${item.name}${size == 'Std' ? '' : ' ($size)'}',
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: qtyCtl,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Enter Quantity',
+                hintText: '0 to remove',
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (v) {
+                final q = int.tryParse(v.trim()) ?? 0;
+                setState(() => o.setQty(item, size, q));
+                Navigator.pop(ctx);
+              },
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Quick Select:',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: brandGreen,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ActionChip(
+                  backgroundColor: Colors.red.shade50,
+                  label: const Text(
+                    'Clear (0)',
+                    style: TextStyle(color: Colors.red, fontSize: 12),
+                  ),
+                  onPressed: () {
+                    setState(() => o.setQty(item, size, 0));
+                    Navigator.pop(ctx);
+                  },
+                ),
+                for (final q in [1, 2, 5, 10, 15, 20, 30, 50, 100])
+                  ActionChip(
+                    backgroundColor: brandLight,
+                    label: Text(
+                      '$q',
+                      style: const TextStyle(
+                        color: brandGreen,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                    onPressed: () {
+                      setState(() => o.setQty(item, size, q));
+                      Navigator.pop(ctx);
+                    },
+                  ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(minimumSize: const Size(90, 40)),
+            onPressed: () {
+              final q = int.tryParse(qtyCtl.text.trim()) ?? 0;
+              setState(() => o.setQty(item, size, q));
+              Navigator.pop(ctx);
+            },
+            child: const Text('Set Qty'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> showCustomItemDialog(String currentCat) async {
     final nameCtl = TextEditingController();
     final priceCtl = TextEditingController();
+    final qtyCtl = TextEditingController(text: '1');
     String chosenCat = currentCat;
     await showDialog(
       context: context,
@@ -812,13 +985,32 @@ class _MenuState extends State<MenuScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              TextField(
-                controller: priceCtl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(
-                  labelText: 'Unit Price (SGD)',
-                  border: OutlineInputBorder(),
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: priceCtl,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(
+                        labelText: 'Price (SGD)',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  SizedBox(
+                    width: 80,
+                    child: TextField(
+                      controller: qtyCtl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Qty',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -832,6 +1024,7 @@ class _MenuState extends State<MenuScreen> {
               onPressed: () {
                 final nm = nameCtl.text.trim();
                 final pr = double.tryParse(priceCtl.text.trim());
+                final q = int.tryParse(qtyCtl.text.trim()) ?? 1;
                 if (nm.isEmpty || pr == null) return;
                 final custom = Item.custom(
                   id: 'CUST_${DateTime.now().millisecondsSinceEpoch}',
@@ -841,11 +1034,11 @@ class _MenuState extends State<MenuScreen> {
                 );
                 setState(() {
                   menu.insert(0, custom);
-                  o.setQty(custom, 'Std', 1);
+                  o.setQty(custom, 'Std', q);
                 });
                 Navigator.pop(ctx);
               },
-              child: const Text('Add to Order'),
+              child: const Text('Add'),
             ),
           ],
         ),
@@ -864,7 +1057,8 @@ class _MenuState extends State<MenuScreen> {
         .toList();
 
     final subs = <String>{'All', for (final i in allCatItems) i.sub}.toList();
-    final activeSub = subs.contains(selectedSub[cat]) ? selectedSub[cat]! : 'All';
+    final activeSub =
+        subs.contains(selectedSub[cat]) ? selectedSub[cat]! : 'All';
     final filtered = allCatItems
         .where((i) => activeSub == 'All' || i.sub == activeSub)
         .toList();
@@ -889,6 +1083,7 @@ class _MenuState extends State<MenuScreen> {
       }
       final sz = i.sizes(o.dineIn);
       final s = sz.contains(sel[i.id]) ? sel[i.id]! : sz.first;
+      final curQty = o.qty(i, s);
       w.add(
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -916,24 +1111,46 @@ class _MenuState extends State<MenuScreen> {
                     ),
                   ),
                   IconButton.outlined(
+                    visualDensity: VisualDensity.compact,
                     onPressed: () =>
-                        setState(() => o.setQty(i, s, o.qty(i, s) - 1)),
+                        setState(() => o.setQty(i, s, curQty - 1)),
                     icon: const Icon(Icons.remove),
                   ),
-                  SizedBox(
-                    width: 30,
-                    child: Text(
-                      '${o.qty(i, s)}',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
+                  const SizedBox(width: 4),
+                  // Tappable Quick Quantity Badge
+                  InkWell(
+                    onTap: () => showQuickQtyDialog(i, s),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      constraints: const BoxConstraints(minWidth: 44),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: curQty > 0 ? brandLight : Colors.grey.shade100,
+                        border: Border.all(
+                          color: curQty > 0 ? brandGreen : Colors.grey.shade400,
+                          width: curQty > 0 ? 1.5 : 1,
+                        ),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '$curQty',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: curQty > 0 ? brandGreen : Colors.black87,
+                        ),
                       ),
                     ),
                   ),
+                  const SizedBox(width: 4),
                   IconButton.outlined(
+                    visualDensity: VisualDensity.compact,
                     onPressed: () =>
-                        setState(() => o.setQty(i, s, o.qty(i, s) + 1)),
+                        setState(() => o.setQty(i, s, curQty + 1)),
                     icon: const Icon(Icons.add, color: brandGreen),
                   ),
                 ],
@@ -978,13 +1195,21 @@ class _MenuState extends State<MenuScreen> {
                         color: activeSub == sc ? Colors.white : brandGreen,
                         fontWeight: FontWeight.w600,
                       ),
-                      onSelected: (_) =>
-                          setState(() => selectedSub[cat] = sc),
+                      onSelected: (_) => setState(() => selectedSub[cat] = sc),
                     ),
                   ),
               ],
             ),
           ),
+        Container(
+          width: double.infinity,
+          color: Colors.amber.shade50,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+          child: const Text(
+            'Tip: Tap any quantity box to type a number or pick 5, 10, 20, 30, 50, 100',
+            style: TextStyle(fontSize: 12, color: Colors.black87),
+          ),
+        ),
         Expanded(
           child: w.isEmpty
               ? const Center(child: Text('No matching dishes found'))
@@ -1001,7 +1226,7 @@ class _MenuState extends State<MenuScreen> {
           builder: (tabCtx) => Scaffold(
             appBar: AppBar(
               title: Text(
-                '${o.table.isEmpty ? o.name : '${o.table} · ${o.name}'} · ${o.pax} pax · ${o.mode}',
+                '${o.mode} · ${o.pax} pax${o.name.isEmpty ? '' : ' · ${o.name}'}',
                 style: const TextStyle(fontSize: 15),
               ),
               actions: [
@@ -1031,7 +1256,8 @@ class _MenuState extends State<MenuScreen> {
                         onChanged: (v) =>
                             setState(() => query = v.trim().toLowerCase()),
                         decoration: InputDecoration(
-                          hintText: 'Search 150 dishes (e.g. Rendang, Siakap)...',
+                          hintText:
+                              'Search 150 dishes (e.g. Rendang, Siakap)...',
                           prefixIcon: const Icon(Icons.search, size: 20),
                           suffixIcon: query.isEmpty
                               ? null
@@ -1106,7 +1332,7 @@ class _MenuState extends State<MenuScreen> {
       );
 }
 
-// ---------- Screen 3: Review, Discount, Deposit & Payment Method ----------
+// ---------- Screen 3: Review, Delivery Charge, Discount, Deposit & Payment ----------
 class ReviewScreen extends StatefulWidget {
   final Order o;
   const ReviewScreen(this.o, {super.key});
@@ -1116,11 +1342,14 @@ class ReviewScreen extends StatefulWidget {
 
 class _ReviewScreenState extends State<ReviewScreen> {
   Order get o => widget.o;
-  late final TextEditingController discCtl, depCtl;
+  late final TextEditingController delivCtl, discCtl, depCtl;
 
   @override
   void initState() {
     super.initState();
+    delivCtl = TextEditingController(
+      text: o.deliveryFee > 0 ? f(o.deliveryFee) : '',
+    );
     discCtl = TextEditingController(
       text: o.discount > 0 ? f(o.discount) : '',
     );
@@ -1145,33 +1374,37 @@ class _ReviewScreenState extends State<ReviewScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          '${o.name.isEmpty ? 'Walk-in' : o.name} · ${o.mobile}',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15,
+                        Expanded(
+                          child: Text(
+                            '${o.name.isEmpty ? 'Walk-in' : o.name}${o.mobile.isEmpty ? '' : ' · ${o.mobile}'}',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                            ),
                           ),
                         ),
-                        if (o.table.isNotEmpty)
-                          Chip(
-                            label: Text(
-                              'Table ${o.table}',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                              ),
+                        Chip(
+                          label: Text(
+                            '${o.mode} · ${o.pax} Pax',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
                             ),
-                            backgroundColor: brandGreen,
-                            visualDensity: VisualDensity.compact,
                           ),
+                          backgroundColor: brandGreen,
+                          visualDensity: VisualDensity.compact,
+                        ),
                       ],
                     ),
-                    Text(
-                      '${fmtDate(o.date)} ${o.time} · ${o.pax} pax · ${o.mode}',
-                    ),
+                    Text('${fmtDate(o.date)} at ${o.time}'),
+                    if (o.table.trim().isNotEmpty)
+                      Text(
+                        '${o.isDeliveryOrCatering ? 'Address' : 'Table'}: ${o.table}',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
                     if (o.notes.trim().isNotEmpty)
                       Padding(
-                        padding: const EdgeInsets.only(top: 6),
+                        padding: const EdgeInsets.only(top: 4),
                         child: Text(
                           'Remarks: ${o.notes}',
                           style: const TextStyle(
@@ -1209,7 +1442,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
             ],
             const Divider(height: 24),
             const Text(
-              'Payment, Discount & Deposit',
+              'Delivery Charge, Discount & Deposit',
               style: TextStyle(
                 color: brandGreen,
                 fontWeight: FontWeight.bold,
@@ -1218,6 +1451,21 @@ class _ReviewScreenState extends State<ReviewScreen> {
             const SizedBox(height: 10),
             Row(
               children: [
+                Expanded(
+                  child: TextField(
+                    controller: delivCtl,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Delivery (\$)',
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (v) => setState(
+                      () => o.deliveryFee = double.tryParse(v.trim()) ?? 0.0,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Expanded(
                   child: TextField(
                     controller: discCtl,
@@ -1232,14 +1480,14 @@ class _ReviewScreenState extends State<ReviewScreen> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 8),
                 Expanded(
                   child: TextField(
                     controller: depCtl,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
                     decoration: const InputDecoration(
-                      labelText: 'Deposit Paid (\$)',
+                      labelText: 'Deposit (\$)',
                       border: OutlineInputBorder(),
                     ),
                     onChanged: (v) => setState(
@@ -1250,6 +1498,11 @@ class _ReviewScreenState extends State<ReviewScreen> {
               ],
             ),
             const SizedBox(height: 12),
+            const Text(
+              'Payment Method',
+              style: TextStyle(fontSize: 12, color: Colors.black54),
+            ),
+            const SizedBox(height: 4),
             Wrap(
               spacing: 8,
               children: [
@@ -1277,10 +1530,18 @@ class _ReviewScreenState extends State<ReviewScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Subtotal (excl. GST)'),
-                    Text('\$${f(o.total - o.gst)}'),
+                    const Text('Items Subtotal'),
+                    Text('\$${f(o.rawTotal)}'),
                   ],
                 ),
+                if (o.deliveryFee > 0)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Delivery Charge'),
+                      Text('+\$${f(o.deliveryFee)}'),
+                    ],
+                  ),
                 if (o.discount > 0)
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1292,6 +1553,13 @@ class _ReviewScreenState extends State<ReviewScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
+                    const Text('Subtotal (excl. GST)'),
+                    Text('\$${f(o.total - o.gst)}'),
+                  ],
+                ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
                     const Text('GST 9% (included)'),
                     Text('\$${f(o.gst)}'),
                   ],
@@ -1300,7 +1568,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     const Text(
-                      'Grand Total',
+                      'Grand Total (SGD)',
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
                     Text(
@@ -1340,13 +1608,16 @@ class _ReviewScreenState extends State<ReviewScreen> {
                 ],
                 const SizedBox(height: 8),
                 FilledButton(
-                  child: const Text('Confirm & Send to Kitchen'),
+                  child: const Text('Confirm Order & Tax Invoice'),
                   onPressed: () async {
                     if (o.inv.isEmpty) {
                       o.inv = await nextInv(o.date);
                     }
                     await saveOrder(o);
-                    final err = await tryPrint(o);
+                    String? err;
+                    if (cfg['autoPrint'] == 'true') {
+                      err = await tryPrint(o);
+                    }
                     if (c.mounted) {
                       Navigator.pushAndRemoveUntil(
                         c,
@@ -1367,7 +1638,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
       );
 }
 
-// ---------- Screen 4: Confirmed Order + KOT / Receipt Preview ----------
+// ---------- Screen 4: Confirmed Order + 80mm Tax Invoice & PDF (No KOT) ----------
 class DoneScreen extends StatefulWidget {
   final Order o;
   final String? err;
@@ -1378,7 +1649,6 @@ class DoneScreen extends StatefulWidget {
 
 class _DoneState extends State<DoneScreen> {
   String? err;
-  bool showKotPreview = true;
 
   @override
   void initState() {
@@ -1389,7 +1659,7 @@ class _DoneState extends State<DoneScreen> {
   @override
   Widget build(BuildContext c) {
     final o = widget.o;
-    final previewLines = showKotPreview ? kotLines(o) : receiptLines(o);
+    final previewLines = receiptLines(o);
     return Scaffold(
       appBar: AppBar(
         title: Text('Confirmed · ${o.inv}'),
@@ -1415,9 +1685,9 @@ class _DoneState extends State<DoneScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '${o.table.isEmpty ? '' : 'Table ${o.table} · '}Total \$${f(o.total)} (Balance \$${f(o.balanceDue)})',
+                          '${o.mode} (${o.pax} Pax) · Total \$${f(o.total)} (Bal \$${f(o.balanceDue)})',
                           style: const TextStyle(
-                            fontSize: 16,
+                            fontSize: 15,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
@@ -1430,30 +1700,19 @@ class _DoneState extends State<DoneScreen> {
                             ),
                           )
                         else
-                          const Text(
-                            'Sent to 80mm LAN printer',
-                            style: TextStyle(color: brandGreen, fontSize: 12),
+                          Text(
+                            cfg['autoPrint'] == 'true'
+                                ? 'Receipt sent to 80mm LAN printer'
+                                : 'Order saved (tap below to print or share PDF)',
+                            style: const TextStyle(
+                              color: brandGreen,
+                              fontSize: 12,
+                            ),
                           ),
                       ],
                     ),
                   ),
                 ],
-              ),
-              const SizedBox(height: 10),
-              SegmentedButton<bool>(
-                segments: const [
-                  ButtonSegment(
-                    value: true,
-                    label: Text('Kitchen Chit (KOT)'),
-                  ),
-                  ButtonSegment(
-                    value: false,
-                    label: Text('80mm Tax Invoice'),
-                  ),
-                ],
-                selected: {showKotPreview},
-                onSelectionChanged: (s) =>
-                    setState(() => showKotPreview = s.first),
               ),
               const SizedBox(height: 10),
               Expanded(
@@ -1477,30 +1736,18 @@ class _DoneState extends State<DoneScreen> {
                 ),
               ),
               const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: FilledButton.icon(
-                      icon: const Icon(Icons.soup_kitchen_outlined),
-                      label: const Text('Print KOT'),
-                      onPressed: () async {
-                        final e = await tryPrintKot(o);
-                        setState(() => err = e);
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: FilledButton.icon(
-                      icon: const Icon(Icons.print),
-                      label: const Text('Print Bill'),
-                      onPressed: () async {
-                        final e = await tryPrint(o);
-                        setState(() => err = e);
-                      },
-                    ),
-                  ),
-                ],
+              FilledButton.icon(
+                icon: const Icon(Icons.print),
+                label: const Text('Print 80mm Tax Invoice'),
+                onPressed: () async {
+                  final e = await tryPrint(o);
+                  setState(() => err = e);
+                  if (c.mounted && e == null) {
+                    ScaffoldMessenger.of(c).showSnackBar(
+                      const SnackBar(content: Text('Receipt sent to printer')),
+                    );
+                  }
+                },
               ),
               const SizedBox(height: 8),
               OutlinedButton.icon(
@@ -1569,6 +1816,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
         return o.name.toLowerCase().contains(q) ||
             o.mobile.toLowerCase().contains(q) ||
             o.table.toLowerCase().contains(q) ||
+            o.mode.toLowerCase().contains(q) ||
             o.inv.toLowerCase().contains(q);
       }
       return true;
@@ -1581,14 +1829,16 @@ class _HistoryScreenState extends State<HistoryScreen> {
         'Invoice',
         'Date',
         'Time',
-        'Mode',
-        'Table',
+        'Order Type',
+        'Table / Address',
         'Customer',
         'Mobile',
         'Pax',
+        'Items Subtotal',
+        'Delivery Charge',
+        'Discount',
         'Total SGD',
         'GST 9%',
-        'Discount',
         'Deposit',
         'Balance Due',
         'Payment Method',
@@ -1604,9 +1854,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
           o.name,
           o.mobile,
           o.pax,
+          f(o.rawTotal),
+          f(o.deliveryFee),
+          f(o.discount),
           f(o.total),
           f(o.gst),
-          f(o.discount),
           f(o.deposit),
           f(o.balanceDue),
           o.payMethod,
@@ -1618,7 +1870,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Sales CSV copied to clipboard & opening share dialog...'),
+          content:
+              Text('Sales CSV copied to clipboard & opening share dialog...'),
         ),
       );
     }
@@ -1652,7 +1905,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                // Daily Sales Summary Banner
                 Container(
                   margin: const EdgeInsets.all(12),
                   padding: const EdgeInsets.all(14),
@@ -1747,8 +1999,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     ],
                   ),
                 ),
-
-                // Search & Date Filter Row
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   child: Row(
@@ -1757,7 +2007,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         child: TextField(
                           onChanged: (v) => setState(() => search = v.trim()),
                           decoration: const InputDecoration(
-                            hintText: 'Search name, table, mobile or INV...',
+                            hintText: 'Search name, mode, mobile or INV...',
                             prefixIcon: Icon(Icons.search, size: 18),
                             isDense: true,
                             border: OutlineInputBorder(),
@@ -1775,7 +2025,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   ),
                 ),
                 const SizedBox(height: 8),
-
                 Expanded(
                   child: list.isEmpty
                       ? const Center(child: Text('No orders found'))
@@ -1797,7 +2046,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                       children: [
                                         Expanded(
                                           child: Text(
-                                            '${o.name.isEmpty ? 'Walk-in' : o.name}${o.table.isEmpty ? '' : ' · Table ${o.table}'}',
+                                            '${o.name.isEmpty ? 'Walk-in' : o.name} · ${o.mode}',
                                             style: const TextStyle(
                                               fontSize: 16,
                                               fontWeight: FontWeight.bold,
@@ -1815,14 +2064,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                       ],
                                     ),
                                     Text(
-                                      '${o.inv} · ${o.mode} · ${o.pax} pax · ${fmtDate(o.date)} ${o.time}',
+                                      '${o.inv} · ${o.pax} pax · ${fmtDate(o.date)} ${o.time}${o.table.isEmpty ? '' : ' · ${o.table}'}',
                                       style: const TextStyle(
                                         color: Colors.black54,
                                         fontSize: 12,
                                       ),
                                     ),
                                     Text(
-                                      'Payment: ${o.payMethod}${o.deposit > 0 ? ' (Deposit \$${f(o.deposit)}, Bal \$${f(o.balanceDue)})' : ''}',
+                                      'Payment: ${o.payMethod}${o.deliveryFee > 0 ? ' · Delivery \$${f(o.deliveryFee)}' : ''}${o.deposit > 0 ? ' · Deposit \$${f(o.deposit)} (Bal \$${f(o.balanceDue)})' : ''}',
                                       style: const TextStyle(
                                         color: brandGreen,
                                         fontSize: 12,
@@ -1840,7 +2089,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                       children: [
                                         FilledButton.tonalIcon(
                                           icon: const Icon(Icons.edit, size: 16),
-                                          label: const Text('Edit / Add Items'),
+                                          label: const Text('Edit Order'),
                                           onPressed: () async {
                                             await go(
                                               c,
@@ -1849,33 +2098,30 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                             reload();
                                           },
                                         ),
-                                        TextButton(
-                                          onPressed: () async {
-                                            final e = await tryPrintKot(o);
-                                            if (c.mounted && e != null) {
-                                              ScaffoldMessenger.of(c)
-                                                  .showSnackBar(
-                                                SnackBar(content: Text(e)),
-                                              );
-                                            }
-                                          },
-                                          child: const Text('Print KOT'),
-                                        ),
-                                        TextButton(
+                                        TextButton.icon(
+                                          icon: const Icon(Icons.print, size: 16),
                                           onPressed: () async {
                                             final e = await tryPrint(o);
-                                            if (c.mounted && e != null) {
+                                            if (c.mounted) {
                                               ScaffoldMessenger.of(c)
                                                   .showSnackBar(
-                                                SnackBar(content: Text(e)),
+                                                SnackBar(
+                                                  content: Text(
+                                                    e ?? 'Receipt printed',
+                                                  ),
+                                                ),
                                               );
                                             }
                                           },
-                                          child: const Text('Print Bill'),
+                                          label: const Text('Print Bill'),
                                         ),
-                                        TextButton(
+                                        TextButton.icon(
+                                          icon: const Icon(
+                                            Icons.picture_as_pdf,
+                                            size: 16,
+                                          ),
                                           onPressed: () => shareInvoice(o),
-                                          child: const Text('PDF'),
+                                          label: const Text('Invoice PDF'),
                                         ),
                                         IconButton(
                                           tooltip: 'Delete Order',
@@ -1904,7 +2150,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 }
 
-// ---------- Screen 6: Settings ----------
+// ---------- Screen 6: App & Printer Settings ----------
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
   @override
@@ -1912,74 +2158,307 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsState extends State<SettingsScreen> {
-  final ctl = {
-    for (final k in cfg.keys) k: TextEditingController(text: cfg[k]),
-  };
-  static const labels = {
-    'ip': 'Printer IP address',
-    'port': 'Printer port',
-    'company': 'Company name',
-    'uen': 'UEN',
-    'gstNo': 'GST Reg. No.',
-    'address': 'Address',
-    'phone': 'Phone',
-    'menuUrl': 'Menu link (Google Sheet CSV)',
-  };
+  late final Map<String, TextEditingController> ctl;
+  late String selectedCols;
+  late bool autoPrint;
+
+  @override
+  void initState() {
+    super.initState();
+    ctl = {
+      for (final k in cfg.keys) k: TextEditingController(text: cfg[k]),
+    };
+    selectedCols = ['32', '42', '48'].contains(cfg['cols']) ? cfg['cols']! : '42';
+    autoPrint = cfg['autoPrint'] != 'false';
+  }
 
   Future<void> save() async {
     for (final k in ctl.keys) {
       cfg[k] = ctl[k]!.text.trim();
     }
+    cfg['cols'] = selectedCols;
+    cfg['autoPrint'] = autoPrint ? 'true' : 'false';
     await saveCfg();
     await loadMenu();
   }
 
   @override
   Widget build(BuildContext c) => Scaffold(
-        appBar: AppBar(title: const Text('Settings')),
+        appBar: AppBar(title: const Text('App & Printer Settings')),
         body: ListView(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.all(16),
           children: [
-            for (final k in ctl.keys)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 14),
-                child: TextField(
-                  controller: ctl[k],
-                  decoration: InputDecoration(
-                    labelText: labels[k],
-                    border: const OutlineInputBorder(),
-                  ),
+            // Section 1: LAN Thermal Printer Settings
+            Card(
+              color: brandLight.withValues(alpha: 0.45),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: brandGreen.withValues(alpha: 0.3)),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.print, color: brandGreen),
+                        SizedBox(width: 8),
+                        Text(
+                          'LAN Thermal Receipt Printer',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: brandGreen,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          flex: 2,
+                          child: TextField(
+                            controller: ctl['ip'],
+                            decoration: const InputDecoration(
+                              labelText: 'Printer IP Address',
+                              filled: true,
+                              fillColor: Colors.white,
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextField(
+                            controller: ctl['port'],
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Port',
+                              filled: true,
+                              fillColor: Colors.white,
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      value: selectedCols,
+                      decoration: const InputDecoration(
+                        labelText: 'Paper Width (Characters per Line)',
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(),
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: '42',
+                          child: Text('80mm Standard (42 columns)'),
+                        ),
+                        DropdownMenuItem(
+                          value: '48',
+                          child: Text('80mm Wide Font B (48 columns)'),
+                        ),
+                        DropdownMenuItem(
+                          value: '32',
+                          child: Text('58mm Compact (32 columns)'),
+                        ),
+                      ],
+                      onChanged: (v) =>
+                          setState(() => selectedCols = v ?? '42'),
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      activeColor: brandGreen,
+                      title: const Text(
+                        'Auto-Print Receipt on Order Confirm',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      subtitle: const Text(
+                        'Automatically send tax invoice to printer when confirming order',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                      value: autoPrint,
+                      onChanged: (v) => setState(() => autoPrint = v),
+                    ),
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(46),
+                        backgroundColor: Colors.white,
+                      ),
+                      icon: const Icon(Icons.receipt),
+                      label: const Text('Save & Print Test Receipt'),
+                      onPressed: () async {
+                        await save();
+                        final e = await tryPrint(
+                          Order()
+                            ..name = 'TEST PRINT'
+                            ..inv = 'TEST-001'
+                            ..mode = 'Dine in'
+                            ..table = 'T-1',
+                        );
+                        if (c.mounted) {
+                          ScaffoldMessenger.of(c).showSnackBar(
+                            SnackBar(
+                              content: Text(e ?? 'Test receipt sent to printer'),
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                  ],
                 ),
               ),
-            const Text('GST 9% is included in menu prices.'),
-            const SizedBox(height: 14),
-            OutlinedButton(
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size.fromHeight(50),
-              ),
-              onPressed: () async {
-                await save();
-                final e = await tryPrint(
-                  Order()
-                    ..name = 'TEST'
-                    ..inv = 'TEST'
-                    ..table = 'T-1',
-                );
-                if (c.mounted) {
-                  ScaffoldMessenger.of(c).showSnackBar(
-                    SnackBar(content: Text(e ?? 'Test receipt sent')),
-                  );
-                }
-              },
-              child: const Text('Save & Print Test Receipt'),
             ),
-            const SizedBox(height: 10),
-            FilledButton(
+            const SizedBox(height: 16),
+
+            // Section 2: App, Company & Menu Settings
+            Card(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: Colors.grey.shade300),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.storefront, color: brandGreen),
+                        SizedBox(width: 8),
+                        Text(
+                          'Company, Invoice & Menu Settings',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: brandGreen,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: ctl['company'],
+                      decoration: const InputDecoration(
+                        labelText: 'Company Name',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: ctl['uen'],
+                            decoration: const InputDecoration(
+                              labelText: 'UEN',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextField(
+                            controller: ctl['gstNo'],
+                            decoration: const InputDecoration(
+                              labelText: 'GST Reg. No.',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: ctl['defaultDelivery'],
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: 'Default Delivery Charge (\$)',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextField(
+                            controller: ctl['phone'],
+                            keyboardType: TextInputType.phone,
+                            decoration: const InputDecoration(
+                              labelText: 'Restaurant Phone',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: ctl['address'],
+                      decoration: const InputDecoration(
+                        labelText: 'Restaurant Address',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: ctl['menuUrl'],
+                      decoration: const InputDecoration(
+                        labelText: 'Live Menu Link (Google Sheet CSV)',
+                        hintText: 'Leave blank to use built-in offline menu',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Loaded dishes: ${menu.length} items (GST 9% incl.)',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.black54,
+                          ),
+                        ),
+                        TextButton.icon(
+                          icon: const Icon(Icons.sync, size: 16),
+                          label: const Text('Reload Menu'),
+                          onPressed: () async {
+                            await save();
+                            setState(() {});
+                            if (c.mounted) {
+                              ScaffoldMessenger.of(c).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Menu reloaded (${menu.length} items)',
+                                  ),
+                                ),
+                              );
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              icon: const Icon(Icons.save),
+              label: const Text('Save All Settings'),
               onPressed: () async {
                 await save();
                 if (c.mounted) Navigator.pop(c);
               },
-              child: const Text('Save Settings'),
             ),
           ],
         ),
