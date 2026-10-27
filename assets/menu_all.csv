@@ -1,0 +1,151 @@
+id,category,subcategory,name,price,dinein_M,takeaway_M,dinein_L,takeaway_L,note,available,sort
+M001,Hidang,Chicken,Ayam Goreng,4.5,,,,,,Yes,1
+M002,Hidang,Chicken,Ayam Bakar Sunda,5.5,,,,,,Yes,2
+M003,Hidang,Chicken,Ayam Masak Merah,4.5,,,,,,Yes,3
+M004,Hidang,Chicken,Ayam Lemak Cili Padi,4.5,,,,,,Yes,4
+M005,Hidang,Chicken,Ayam Kalio,4.5,,,,,,Yes,5
+M006,Hidang,Beef,Beef Rendang,5.0,,,,,,Yes,6
+M007,Hidang,Beef,Black Pepper Beef,5.0,10.0,12.0,12.0,,,Yes,7
+M008,Hidang,Beef,Rendang Limpa,4.5,,,,,,Yes,8
+M009,Hidang,Beef,Paru Belado,4.0,9.0,11.0,11.0,13.0,,Yes,9
+M010,Hidang,Beef,Paru Goreng,2.0,,,,,,Yes,10
+M011,Hidang,Beef,Lemak Babat,4.0,9.0,11.0,11.0,13.0,DISCONTINUED/ SEASONAL ONLY,No,11
+M012,Hidang,Beef,Sambal Goreng Pengantin,4.0,9.0,11.0,11.0,13.0,,Yes,12
+M013,Hidang,Beef,Rawon,4.0,9.0,11.0,11.0,13.0,,Yes,13
+M014,Hidang,Beef,Sop Bakso,7.0,,,,,,Yes,14
+M015,Hidang,Beef,Sop Ekor,8.5,,,,,,Yes,15
+M016,Hidang,Fish,Sweet & Sour Fish,3.5,7.0,7.0,9.0,9.0,,Yes,16
+M017,Hidang,Fish,Ikan Goreng,5.0,,,,,,Yes,17
+M018,Hidang,Fish,Ikan Goreng Belado,5.0,,,,,,Yes,18
+M019,Hidang,Fish,Ikan Asam Pedas,5.0,,,,,,Yes,19
+M020,Hidang,Fish,Telur Ikan Goreng,4.5,,,,,,Yes,20
+M021,Hidang,Fish,Telur Ikan Asam Pedas,12.0,,,,,3 pieces,Yes,21
+M022,Hidang,Bbq Fish,Siakap Bakar,,28.0,28.0,30.0,30.0,Medium/Large,Yes,22
+M023,Hidang,Bbq Fish,Ikan Selar/Kembong,,8.0,8.0,,,Medium/Large,Yes,23
+M024,Hidang,Bbq Fish,Ikan Pari,,10.0,10.0,12.0,12.0,Medium/Large,Yes,24
+M025,Hidang,Bbq Fish,Ikan Cencaru,,10.0,10.0,12.0,12.0,Medium/Large,Yes,25
+M026,Hidang,Bbq Fish,Ikan Bawal,,,,14.0,14.0,Medium/Large,Yes,26
+M027,Hidang,Seafood,Sotong Hitam,6.0,8.0,8.0,10.0,10.0,Sizes: Small 6 / Medium 8 / Large 10 (Small in price column),Yes,27
+M028,Hidang,Seafood,Sambal Sotong Kembang,4.0,9.0,11.0,11.0,13.0,,Yes,28
+M029,Hidang,Seafood,Lemak Siput Sedut,,7.5,7.5,9.5,9.5,,Yes,29
+M030,Hidang,Seafood,Udang Sambal,4.0,8.0,,12.0,12.0,,Yes,30
+M031,Hidang,Vegetables,Sayur Lodeh,1.5,5.0,5.0,7.0,7.0,Per serving: $1.50 plain / $2.00 with tahu,Yes,31
+M032,Hidang,Vegetables,Lemak Nangka,1.5,5.0,5.0,7.0,7.0,,Yes,32
+M033,Hidang,Vegetables,Lemak Pucuk Ubi,1.5,5.0,5.0,7.0,7.0,,Yes,33
+M034,Hidang,Vegetables,Urap,1.5,5.0,5.0,7.0,7.0,,Yes,34
+M035,Hidang,Vegetables,Stir-Fried Vegetables,1.5,5.0,5.0,7.0,7.0,,Yes,35
+M036,Hidang,Vegetables,Brinjal Belado,1.5,5.0,5.0,7.0,7.0,,Yes,36
+M037,Hidang,Vegetables,Ulam & Sambal Belacan,3.0,,,,,,Yes,37
+M038,Hidang,Side Dishes,Steamed White Rice,1.5,,,,,,Yes,38
+M039,Hidang,Side Dishes,Telur Sambal,1.5,,,,,,Yes,39
+M040,Hidang,Side Dishes,Telur Dadar (Omelette),1.5,,,,,,Yes,40
+M041,Hidang,Side Dishes,Telur Mata Lembu,1.5,,,,,,Yes,41
+M042,Hidang,Side Dishes,Telur Asin,1.5,,,,,,Yes,42
+M043,Hidang,Side Dishes,Begedel,1.5,,,,,,Yes,43
+M044,Hidang,Side Dishes,Kentang Belado,1.5,5.0,6.0,7.0,8.0,,Yes,44
+M045,Hidang,Side Dishes,Ikan Asin Bombay,1.5,4.0,4.0,6.0,,,Yes,45
+M046,Hidang,Side Dishes,Ikan Bilis Kacang,2.0,6.0,7.0,,,,Yes,46
+M047,Hidang,Side Dishes,Tempe Madu,2.0,6.0,7.0,,,,Yes,47
+M048,Hidang,Side Dishes,Sambal Goreng Jawa,2.0,6.0,7.0,8.0,9.0,,Yes,48
+M049,Hidang,Side Dishes,Sambal Telor Burung,2.5,,,,,,Yes,49
+M050,Hidang,Side Dishes,Ikan Bilis Petai,2.5,,,,,,Yes,50
+M051,Hidang,Side Dishes,Fried Chicken Wing,2.5,,,,,,Yes,51
+M052,Hidang,Side Dishes,Sampler Sambal Belacan,2.0,,,,,,Yes,52
+M053,Hidang,Side Dishes,Sampler Sambal Belado,2.0,,,,,,Yes,53
+M054,Hidang,Side Dishes,Sampler Sambal Kicap,2.0,,,,,,Yes,54
+M055,Hidang,Side Dishes,Kuah Ayam Lemak Cili Padi,,1.5,1.5,,,,Yes,55
+M056,Hidang,Side Dishes,Kuah Ayam Kalio,,1.5,1.5,,,,Yes,56
+M057,Hidang,Side Dishes,Kuah Asam Pedas,,1.5,1.5,,,,Yes,57
+M058,Hidang,Side Dishes,Tahu Telur,8.5,,,,,,Yes,58
+M059,Set,Set Meal,Meatless Set,6.0,,,,,,Yes,59
+M060,Set,Set Meal,Paru Set,8.2,,,,,,Yes,60
+M061,Set,Set Meal,Cuttlefish Set,8.2,,,,,,Yes,61
+M062,Set,Set Meal,Prawn Set,,,,,,,Yes,62
+M063,Set,Set Meal,Beef Set,9.2,,,,,,Yes,63
+M064,Set,Set Meal,Fish Set,9.2,,,,,,Yes,64
+M065,Set,Set Meal,Chicken Set,8.7,,,,,,Yes,65
+M066,Set,Set Meal,Nasi Sambal Goreng Set,9.5,,,,,,Yes,66
+M067,Set,Set Meal,Nasi Rawon Set,10.5,,,,,,Yes,67
+M068,Set,Light Meals,Lontong,5.5,,,,,,Yes,68
+M069,Set,Light Meals,Mee/Bee Hoon Soto,6.0,,,,,,Yes,69
+M070,Set,Light Meals,Mee/Bee Hoon Soup,7.0,,,,,,Yes,70
+M071,Set,Light Meals,Mee/Bee Hoon Bakso,7.0,,,,,,Yes,71
+M072,Set,Light Meals,Laksa,6.0,,,,,,Yes,72
+M073,Set,Light Meals,Mee/Kway Teow Goreng,5.5,,,,,,Yes,73
+M074,Set,Light Meals,Roti Jala,6.5,,,,,Weekends only,Yes,74
+M075,Set,Light Meals,Nasi Lemak Set,6.0,,,,,Weekends only,Yes,75
+M076,Set,Ambeng Platter,Original Ambeng Platter,38.0,,,,,,Yes,76
+M077,Set,Ambeng Platter,Premium Ambeng Platter,41.0,,,,,,Yes,77
+M078,Set,Ambeng Platter,Deluxe Nasi Ambeng (No Beef),41.0,,,,,,Yes,78
+M079,Desserts,Desserts & Snacks,Keropok Ikan,2.0,,,,,,Yes,79
+M080,Desserts,Desserts & Snacks,Dadih,1.5,,,,,New,Yes,80
+M081,Desserts,Desserts & Snacks,Agar-Agar Gudil (Original Gula Melaka),1.5,,,,,New,Yes,81
+M082,Desserts,Desserts & Snacks,Agar-Agar Gudil (Pandan Coconut),1.5,,,,,,Yes,82
+M083,Desserts,Desserts & Snacks,Lopes,1.8,,,,,,Yes,83
+M084,Desserts,Desserts & Snacks,Bakwan,1.8,,,,,,Yes,84
+M085,Desserts,Desserts & Snacks,Risola,1.5,,,,,,Yes,85
+M086,Desserts,Desserts & Snacks,Kuih Dadar,1.5,,,,,,Yes,86
+M087,Desserts,Desserts & Snacks,Jongkong,2.0,,,,,,Yes,87
+M088,Desserts,Desserts & Snacks,Suji,3.0,,,,,,Yes,88
+M089,Desserts,Desserts & Snacks,Ondeh-ondeh,3.5,,,,,,Yes,89
+M090,Desserts,Desserts & Snacks,Badak Berendam,3.5,,,,,,Yes,90
+M091,Desserts,Desserts & Snacks,Assorted Bubur,2.5,,,,,Takeaway $3,Yes,91
+M092,Desserts,Desserts & Snacks,Pisang/Cempedak Goreng,3.5,,,,,5 pcs,Yes,92
+M093,Desserts,Desserts & Snacks,Keropok Lekor,0.0,,,,,,No,93
+M094,Desserts,Desserts & Snacks,Samosas,3.5,,,,,5 pcs,Yes,94
+M095,Desserts,Desserts & Snacks,Assorted Kuih Muih (Per piece),1.4,,,,,,Yes,95
+M096,Desserts,Desserts & Snacks,Assorted Kuih Muih (3pcs),4.0,,,,,,Yes,96
+M097,Retail,Drinks Dispenser,Teh Tarik Dispenser (3L),38.0,,,,,,Yes,97
+M098,Retail,Drinks Dispenser,Kopi Tarik Dispenser (3L),38.0,,,,,,Yes,98
+M099,Retail,Drinks Dispenser,Teh Tarik Dispenser (5L),45.0,,,,,,Yes,99
+M100,Retail,Drinks Dispenser,Kopi Tarik Dispenser (5L),45.0,,,,,,Yes,100
+M101,Retail,Sambal Jars,Sambal Belacan Jar,5.5,,,,,,Yes,101
+M102,Retail,Sambal Jars,Sambal Belado Jar,5.5,,,,,,Yes,102
+M103,Retail,Sambal Jars,Sambal Kicap Jar,5.5,,,,,,Yes,103
+M104,Retail,Sambal Jars,Sambal Tumis Jar,5.5,,,,,,Yes,104
+M105,Retail,Frozen,Sambal Seafood Paste (250g),6.0,,,,,,Yes,105
+M106,Retail,Frozen,Black Pepper Paste (250g),6.0,,,,,,Yes,106
+M107,Retail,Frozen,Ayam Masak Merah Paste (250g),6.0,,,,,,Yes,107
+M108,Retail,Frozen,Lontong/Lodeh Paste (250g),6.0,,,,,,Yes,108
+M109,Retail,Frozen,Asam Pedas Paste (250g),6.0,,,,,,Yes,109
+M110,Retail,Frozen,KALIO PASTE 250G,6.0,,,,,,Yes,110
+M111,Retail,Frozen,SOTONG HITAM PASTE 250G,6.0,,,,,,Yes,111
+M112,Retail,Frozen,SOTO PASTE 250G,6.0,,,,,,Yes,112
+M113,Retail,Frozen,Premium Beef Rendang (1kg),35.0,,,,,,Yes,113
+M114,Retail,Frozen,Sambal Goreng Pengantin (1kg),26.0,,,,,,Yes,114
+M115,Retail,Frozen,Sambal Goreng Jawa (1kg),18.0,,,,,,Yes,115
+M116,Retail,Frozen,Sambal Sotong Kembang (1kg),0.0,,,,,,No,116
+M117,Retail,Frozen,Frozen Begedil,5.5,,,,,,Yes,117
+M118,Drinks,Hot,Air Limau,1.6,,,,,V24 price,Yes,118
+M119,Drinks,Hot,Teh O,1.6,,,,,V24 price,Yes,119
+M120,Drinks,Hot,Teh O Halia,2.1,,,,,V24 price,Yes,120
+M121,Drinks,Hot,Kopi O,1.6,,,,,V24 price,Yes,121
+M122,Drinks,Hot,Teh Tarik,1.8,,,,,V24 price,Yes,122
+M123,Drinks,Hot,Teh Halia,2.3,,,,,V24 price,Yes,123
+M124,Drinks,Hot,Kopi Tarik,1.8,,,,,V24 price,Yes,124
+M125,Drinks,Hot,Milo,2.2,,,,,V24 price,Yes,125
+M126,Drinks,Hot,Nescafe,2.2,,,,,V24 price,Yes,126
+M127,Drinks,Cold,Cordial Drinks,2.2,,,,,V24 price,Yes,127
+M128,Drinks,Cold,Bottled Water,2.2,,,,,V24 price,Yes,128
+M129,Drinks,Cold,Canned Drinks,2.2,,,,,V24 price,Yes,129
+M130,Drinks,Cold,Iced Limau,2.6,,,,,V24 price,Yes,130
+M131,Drinks,Cold,Iced Teh O,2.6,,,,,V24 price,Yes,131
+M132,Drinks,Cold,Iced Kopi O,2.6,,,,,V24 price,Yes,132
+M133,Drinks,Cold,Iced Teh Tarik,2.8,,,,,V24 price,Yes,133
+M134,Drinks,Cold,Iced Kopi Tarik,2.8,,,,,V24 price,Yes,134
+M135,Drinks,Cold,Iced Bandung,3.2,,,,,V24 price,Yes,135
+M136,Drinks,Cold,Iced Milo,3.2,,,,,V24 price,Yes,136
+M137,Drinks,Cold,Iced Nescafe,3.2,,,,,V24 price,Yes,137
+M138,Drinks,Specialty,Iced Teh O Limau,3.0,,,,,V24 price,Yes,138
+M139,Drinks,Specialty,Iced Teh O Longan,3.4,,,,,V24 price,Yes,139
+M140,Drinks,Specialty,Iced Teh O Lychee,3.4,,,,,V24 price,Yes,140
+M141,Drinks,Specialty,Iced Longan,2.9,,,,,V24 price,Yes,141
+M142,Drinks,Specialty,Iced Lychee,2.9,,,,,V24 price,Yes,142
+M143,Drinks,Specialty,Iced Blueberry Longan,3.4,,,,,V24 price,Yes,143
+M144,Drinks,Specialty,Iced Blueberry Lychee,3.4,,,,,V24 price,Yes,144
+M145,Drinks,Specialty,Iced Limau Asam Boi,3.4,,,,,V24 price,Yes,145
+M146,Drinks,Specialty,Iced Syrup Limau Selasih,3.4,,,,,V24 price,Yes,146
+M147,Drinks,Specialty,Iced Milo Dinosaur,3.9,,,,,V24 price,Yes,147
+M148,Drinks,Specialty,Iced Neslo Dinosaur,3.9,,,,,V24 price,Yes,148
+M149,Drinks,Specialty,Iced Thai Milk Tea,3.2,,,,,V24 price,Yes,149
+M150,Drinks,Specialty,Iced Thai Green Tea,3.2,,,,,V24 price,Yes,150
