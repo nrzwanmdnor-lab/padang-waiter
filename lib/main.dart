@@ -37,6 +37,11 @@ final cfg = <String, String>{
   'defaultDelivery': '0',
   'address': '',
   'phone': '',
+  'showLogo': 'true',
+  'logoUrl': '',
+  'headerTagline': 'Traditional Nasi Padang & Catering',
+  'footerLine1': 'Thank you! Terima kasih!',
+  'footerLine2': '',
   'menuUrl': '', // paste the Google Sheet "Publish to web > CSV" link here
 };
 
@@ -173,7 +178,9 @@ class Order {
       (rawTotal + deliveryFee - discount).clamp(0.0, double.infinity);
   double get gst =>
       double.parse((total * gstRate / (1 + gstRate)).toStringAsFixed(2));
-  double get balanceDue => (total - deposit).clamp(0.0, double.infinity);
+  double get balanceDue => payMethod == 'Unpaid'
+      ? (total - deposit).clamp(0.0, double.infinity)
+      : (deposit > 0 ? (total - deposit).clamp(0.0, double.infinity) : 0.0);
   double get collectedAmount =>
       payMethod == 'Unpaid' ? deposit : (deposit > 0 ? deposit : total);
   int get count => lines.values.fold(0, (a, l) => a + l.qty);
@@ -315,7 +322,10 @@ List<(String, bool)> receiptLines(Order o) {
   final w = printWidth;
   final locLabel = o.isDeliveryOrCatering ? 'Addr' : 'Table';
   final L = <(String, bool)>[
+    if (cfg['showLogo'] != 'false') (ctr('[ ${cfg['company']!.split(' ').take(2).join(' ')} ]'), true),
     (ctr(cfg['company']!), true),
+    if ((cfg['headerTagline'] ?? '').trim().isNotEmpty)
+      (ctr(cfg['headerTagline']!.trim()), false),
     (ctr(cfg['address']!.isEmpty ? '[Address]' : cfg['address']!), false),
     (ctr('Tel: ${cfg['phone']!.isEmpty ? '[Phone]' : cfg['phone']}'), false),
     (ctr('UEN: ${cfg['uen']}'), false),
@@ -338,6 +348,8 @@ List<(String, bool)> receiptLines(Order o) {
       if (l.qty > 1) L.add(('   @ ${f(l.unit(o.dineIn))}', false));
     }
   }
+  final f1 = (cfg['footerLine1'] ?? 'Thank you! Terima kasih!').trim();
+  final f2 = (cfg['footerLine2'] ?? '').trim();
   L.addAll([
     ('-' * w, false),
     (lr('Items Subtotal', f(o.rawTotal)), false),
@@ -353,7 +365,8 @@ List<(String, bool)> receiptLines(Order o) {
       (lr('Paid via ${o.payMethod}', f(o.total)), false),
     ('-' * w, false),
     ('', false),
-    (ctr('Thank you! Terima kasih!'), false),
+    if (f1.isNotEmpty) (ctr(f1), false),
+    if (f2.isNotEmpty) (ctr(f2), false),
   ]);
   return L;
 }
@@ -407,6 +420,26 @@ Future<void> shareInvoice(Order o) async {
       build: (_) => pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
+          if (cfg['showLogo'] == 'true')
+            pw.Container(
+              padding: const pw.EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 4,
+              ),
+              margin: const pw.EdgeInsets.only(bottom: 6),
+              decoration: pw.BoxDecoration(
+                color: PdfColor.fromHex('#005A2B'),
+                borderRadius: pw.BorderRadius.circular(4),
+              ),
+              child: pw.Text(
+                'HJH MAIMUNAH',
+                style: pw.TextStyle(
+                  color: PdfColors.white,
+                  fontWeight: pw.FontWeight.bold,
+                  fontSize: 11,
+                ),
+              ),
+            ),
           pw.Text(
             cfg['company']!,
             style: pw.TextStyle(
@@ -415,6 +448,14 @@ Future<void> shareInvoice(Order o) async {
               color: PdfColor.fromHex('#005A2B'),
             ),
           ),
+          if ((cfg['headerTagline'] ?? '').trim().isNotEmpty)
+            pw.Text(
+              cfg['headerTagline']!.trim(),
+              style: pw.TextStyle(
+                fontSize: 10,
+                fontStyle: pw.FontStyle.italic,
+              ),
+            ),
           pw.Text('UEN ${cfg['uen']}   GST Reg ${cfg['gstNo']}'),
           if (cfg['address']!.isNotEmpty || cfg['phone']!.isNotEmpty)
             pw.Text('${cfg['address']}  Tel: ${cfg['phone']}'),
@@ -475,6 +516,16 @@ Future<void> shareInvoice(Order o) async {
               ],
             ),
           ),
+          pw.SizedBox(height: 16),
+          if ((cfg['footerLine1'] ?? '').trim().isNotEmpty)
+            pw.Center(child: pw.Text(cfg['footerLine1']!.trim())),
+          if ((cfg['footerLine2'] ?? '').trim().isNotEmpty)
+            pw.Center(
+              child: pw.Text(
+                cfg['footerLine2']!.trim(),
+                style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+              ),
+            ),
         ],
       ),
     ),
@@ -604,9 +655,12 @@ class _CustomerState extends State<CustomerScreen> {
             selected: {o.mode},
             onSelectionChanged: (s) {
               setState(() {
+                final defDeliv = _d(cfg['defaultDelivery']) ?? 0.0;
                 o.mode = s.first;
                 if (o.isDeliveryOrCatering && o.deliveryFee == 0) {
-                  o.deliveryFee = _d(cfg['defaultDelivery']) ?? 0.0;
+                  o.deliveryFee = defDeliv;
+                } else if (!o.isDeliveryOrCatering && o.deliveryFee == defDeliv) {
+                  o.deliveryFee = 0.0;
                 }
               });
             },
@@ -659,95 +713,68 @@ class _CustomerState extends State<CustomerScreen> {
           ),
           const SizedBox(height: 14),
 
-          // Quick Pax Input Card
+          // Pax Input Card (No Quick Chips)
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
               color: brandLight.withValues(alpha: 0.5),
               border: Border.all(color: brandGreen.withValues(alpha: 0.4)),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
               children: [
-                Row(
-                  children: [
-                    const Expanded(
-                      child: Text(
-                        'Pax (Type directly or tap quick buttons)',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: brandGreen,
-                          fontSize: 13,
-                        ),
-                      ),
+                const Expanded(
+                  child: Text(
+                    'Pax',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: brandGreen,
+                      fontSize: 15,
                     ),
-                    IconButton.outlined(
-                      visualDensity: VisualDensity.compact,
-                      onPressed: () => setPaxValue(o.pax - 1),
-                      icon: const Icon(Icons.remove),
-                    ),
-                    const SizedBox(width: 6),
-                    SizedBox(
-                      width: 72,
-                      child: TextField(
-                        controller: paxCtl,
-                        keyboardType: TextInputType.number,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        decoration: InputDecoration(
-                          isDense: true,
-                          filled: true,
-                          fillColor: Colors.white,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 8,
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        onChanged: (v) {
-                          final parsed = int.tryParse(v.trim());
-                          if (parsed != null && parsed > 0) {
-                            o.pax = parsed;
-                          }
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    IconButton.filled(
-                      visualDensity: VisualDensity.compact,
-                      style: IconButton.styleFrom(backgroundColor: brandGreen),
-                      onPressed: () => setPaxValue(o.pax + 1),
-                      icon: const Icon(Icons.add, color: Colors.white),
-                    ),
-                  ],
+                  ),
                 ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    for (final preset in [2, 4, 6, 10, 20, 30, 50, 100])
-                      ChoiceChip(
-                        label: Text(
-                          '$preset',
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                        selected: o.pax == preset,
-                        selectedColor: brandGreen,
-                        labelStyle: TextStyle(
-                          color: o.pax == preset ? Colors.white : brandGreen,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        visualDensity: VisualDensity.compact,
-                        onSelected: (_) => setPaxValue(preset),
+                IconButton.outlined(
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => setPaxValue(o.pax - 1),
+                  icon: const Icon(Icons.remove),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 80,
+                  child: TextField(
+                    controller: paxCtl,
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      filled: true,
+                      fillColor: Colors.white,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 8,
                       ),
-                  ],
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    onChanged: (v) {
+                      final parsed = int.tryParse(v.trim());
+                      if (parsed != null && parsed > 0) {
+                        o.pax = parsed;
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton.filled(
+                  visualDensity: VisualDensity.compact,
+                  style: IconButton.styleFrom(backgroundColor: brandGreen),
+                  onPressed: () => setPaxValue(o.pax + 1),
+                  icon: const Icon(Icons.add, color: Colors.white),
                 ),
               ],
             ),
@@ -1303,9 +1330,61 @@ class _MenuState extends State<MenuScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          '${o.count} items selected',
-                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        Row(
+                          children: [
+                            Text(
+                              '${o.count} items selected',
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                            if (o.count > 0) ...[
+                              const SizedBox(width: 8),
+                              TextButton.icon(
+                                style: TextButton.styleFrom(
+                                  foregroundColor: Colors.red,
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                  ),
+                                ),
+                                icon: const Icon(
+                                  Icons.delete_sweep_outlined,
+                                  size: 18,
+                                ),
+                                label: const Text('Clear'),
+                                onPressed: () async {
+                                  final ok = await showDialog<bool>(
+                                    context: c,
+                                    builder: (ctx) => AlertDialog(
+                                      title: const Text('Clear Cart?'),
+                                      content: const Text(
+                                        'Remove all selected items from this order?',
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () =>
+                                              Navigator.pop(ctx, false),
+                                          child: const Text('Cancel'),
+                                        ),
+                                        FilledButton(
+                                          style: FilledButton.styleFrom(
+                                            backgroundColor: Colors.red,
+                                            minimumSize: const Size(80, 40),
+                                          ),
+                                          onPressed: () =>
+                                              Navigator.pop(ctx, true),
+                                          child: const Text('Clear All'),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                  if (ok == true) {
+                                    setState(() => o.lines.clear());
+                                  }
+                                },
+                              ),
+                            ],
+                          ],
                         ),
                         Text(
                           '\$${f(o.rawTotal)}',
@@ -1358,9 +1437,100 @@ class _ReviewScreenState extends State<ReviewScreen> {
     );
   }
 
+  Future<void> showNotesDialog() async {
+    final ctl = TextEditingController(text: o.notes);
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSt) => AlertDialog(
+          title: const Text('Order / Delivery Notes'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: ctl,
+                autofocus: true,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Remarks (prints on Receipt & PDF)',
+                  hintText: 'e.g. Less spicy, separate gravy, call on arrival',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final tag in [
+                    'Less Spicy',
+                    'Separate Gravy',
+                    'No Peanuts',
+                    'Call on Arrival',
+                  ])
+                    ActionChip(
+                      backgroundColor: brandLight,
+                      label: Text(
+                        '+ $tag',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: brandGreen,
+                        ),
+                      ),
+                      onPressed: () {
+                        final cur = ctl.text.trim();
+                        ctl.text = cur.isEmpty ? tag : '$cur, $tag';
+                        setSt(() {});
+                      },
+                    ),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            if (ctl.text.isNotEmpty)
+              TextButton(
+                onPressed: () {
+                  ctl.clear();
+                  setSt(() {});
+                },
+                child: const Text(
+                  'Clear',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(minimumSize: const Size(90, 40)),
+              onPressed: () {
+                setState(() => o.notes = ctl.text.trim());
+                Navigator.pop(ctx);
+              },
+              child: const Text('Save Notes'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext c) => Scaffold(
-        appBar: AppBar(title: const Text('Review & Payment')),
+        appBar: AppBar(
+          title: const Text('Review & Payment'),
+          actions: [
+            TextButton.icon(
+              style: TextButton.styleFrom(foregroundColor: Colors.amberAccent),
+              icon: const Icon(Icons.edit_note, size: 20),
+              label: const Text('Notes'),
+              onPressed: showNotesDialog,
+            ),
+          ],
+        ),
         body: ListView(
           padding: const EdgeInsets.all(16),
           children: [
@@ -1402,17 +1572,51 @@ class _ReviewScreenState extends State<ReviewScreen> {
                         '${o.isDeliveryOrCatering ? 'Address' : 'Table'}: ${o.table}',
                         style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
-                    if (o.notes.trim().isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(
-                          'Remarks: ${o.notes}',
-                          style: const TextStyle(
-                            color: brandGreen,
-                            fontWeight: FontWeight.w600,
+                    const SizedBox(height: 6),
+                    InkWell(
+                      onTap: showNotesDialog,
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          border: Border.all(
+                            color: brandGreen.withValues(alpha: 0.35),
                           ),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.edit_note,
+                              size: 18,
+                              color: brandGreen,
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                o.notes.trim().isEmpty
+                                    ? 'Tap to add order / delivery notes...'
+                                    : 'Remarks: ${o.notes}',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: o.notes.trim().isEmpty
+                                      ? Colors.black54
+                                      : brandGreen,
+                                  fontWeight: o.notes.trim().isEmpty
+                                      ? FontWeight.normal
+                                      : FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
+                    ),
                   ],
                 ),
               ),
@@ -2131,8 +2335,35 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                             size: 20,
                                           ),
                                           onPressed: () async {
-                                            await deleteOrder(o.inv);
-                                            reload();
+                                            final ok = await showDialog<bool>(
+                                              context: c,
+                                              builder: (ctx) => AlertDialog(
+                                                title: const Text('Delete Order?'),
+                                                content: Text(
+                                                  'Delete ${o.inv} (${o.name.isEmpty ? 'Walk-in' : o.name})?',
+                                                ),
+                                                actions: [
+                                                  TextButton(
+                                                    onPressed: () =>
+                                                        Navigator.pop(ctx, false),
+                                                    child: const Text('Cancel'),
+                                                  ),
+                                                  FilledButton(
+                                                    style: FilledButton.styleFrom(
+                                                      backgroundColor: Colors.red,
+                                                      minimumSize: const Size(80, 40),
+                                                    ),
+                                                    onPressed: () =>
+                                                        Navigator.pop(ctx, true),
+                                                    child: const Text('Delete'),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                            if (ok == true) {
+                                              await deleteOrder(o.inv);
+                                              reload();
+                                            }
                                           },
                                         ),
                                       ],
@@ -2161,6 +2392,7 @@ class _SettingsState extends State<SettingsScreen> {
   late final Map<String, TextEditingController> ctl;
   late String selectedCols;
   late bool autoPrint;
+  late bool showLogo;
 
   @override
   void initState() {
@@ -2168,8 +2400,10 @@ class _SettingsState extends State<SettingsScreen> {
     ctl = {
       for (final k in cfg.keys) k: TextEditingController(text: cfg[k]),
     };
-    selectedCols = ['32', '42', '48'].contains(cfg['cols']) ? cfg['cols']! : '42';
+    selectedCols =
+        ['32', '42', '48'].contains(cfg['cols']) ? cfg['cols']! : '42';
     autoPrint = cfg['autoPrint'] != 'false';
+    showLogo = cfg['showLogo'] != 'false';
   }
 
   Future<void> save() async {
@@ -2178,289 +2412,641 @@ class _SettingsState extends State<SettingsScreen> {
     }
     cfg['cols'] = selectedCols;
     cfg['autoPrint'] = autoPrint ? 'true' : 'false';
+    cfg['showLogo'] = showLogo ? 'true' : 'false';
     await saveCfg();
     await loadMenu();
   }
 
-  @override
-  Widget build(BuildContext c) => Scaffold(
-        appBar: AppBar(title: const Text('App & Printer Settings')),
-        body: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            // Section 1: LAN Thermal Printer Settings
-            Card(
-              color: brandLight.withValues(alpha: 0.45),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: BorderSide(color: brandGreen.withValues(alpha: 0.3)),
+  Future<void> showCsvImportDialog() async {
+    final csvCtl = TextEditingController();
+    final pathCtl = TextEditingController();
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Import POS Menu CSV'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Columns: id,category,subcategory,name,price,dinein_M,takeaway_M,dinein_L,takeaway_L,note,available,sort',
+                style: TextStyle(fontSize: 12, color: Colors.black54),
               ),
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.print, color: brandGreen),
-                        SizedBox(width: 8),
-                        Text(
-                          'LAN Thermal Receipt Printer',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: brandGreen,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          flex: 2,
-                          child: TextField(
-                            controller: ctl['ip'],
-                            decoration: const InputDecoration(
-                              labelText: 'Printer IP Address',
-                              filled: true,
-                              fillColor: Colors.white,
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: TextField(
-                            controller: ctl['port'],
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
-                              labelText: 'Port',
-                              filled: true,
-                              fillColor: Colors.white,
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      value: selectedCols,
-                      decoration: const InputDecoration(
-                        labelText: 'Paper Width (Characters per Line)',
-                        filled: true,
-                        fillColor: Colors.white,
-                        border: OutlineInputBorder(),
-                      ),
-                      items: const [
-                        DropdownMenuItem(
-                          value: '42',
-                          child: Text('80mm Standard (42 columns)'),
-                        ),
-                        DropdownMenuItem(
-                          value: '48',
-                          child: Text('80mm Wide Font B (48 columns)'),
-                        ),
-                        DropdownMenuItem(
-                          value: '32',
-                          child: Text('58mm Compact (32 columns)'),
-                        ),
-                      ],
-                      onChanged: (v) =>
-                          setState(() => selectedCols = v ?? '42'),
-                    ),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      activeColor: brandGreen,
-                      title: const Text(
-                        'Auto-Print Receipt on Order Confirm',
-                        style: TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                      subtitle: const Text(
-                        'Automatically send tax invoice to printer when confirming order',
-                        style: TextStyle(fontSize: 12),
-                      ),
-                      value: autoPrint,
-                      onChanged: (v) => setState(() => autoPrint = v),
-                    ),
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(46),
-                        backgroundColor: Colors.white,
-                      ),
-                      icon: const Icon(Icons.receipt),
-                      label: const Text('Save & Print Test Receipt'),
-                      onPressed: () async {
-                        await save();
-                        final e = await tryPrint(
-                          Order()
-                            ..name = 'TEST PRINT'
-                            ..inv = 'TEST-001'
-                            ..mode = 'Dine in'
-                            ..table = 'T-1',
-                        );
-                        if (c.mounted) {
-                          ScaffoldMessenger.of(c).showSnackBar(
-                            SnackBar(
-                              content: Text(e ?? 'Test receipt sent to printer'),
-                            ),
-                          );
-                        }
-                      },
-                    ),
-                  ],
+              const SizedBox(height: 10),
+              TextField(
+                controller: pathCtl,
+                decoration: const InputDecoration(
+                  labelText: 'Local CSV File Path (optional)',
+                  hintText: '/storage/emulated/0/Download/menu.csv',
+                  border: OutlineInputBorder(),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
-
-            // Section 2: App, Company & Menu Settings
-            Card(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: BorderSide(color: Colors.grey.shade300),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.storefront, color: brandGreen),
-                        SizedBox(width: 8),
-                        Text(
-                          'Company, Invoice & Menu Settings',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: brandGreen,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: ctl['company'],
-                      decoration: const InputDecoration(
-                        labelText: 'Company Name',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: ctl['uen'],
-                            decoration: const InputDecoration(
-                              labelText: 'UEN',
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: TextField(
-                            controller: ctl['gstNo'],
-                            decoration: const InputDecoration(
-                              labelText: 'GST Reg. No.',
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: ctl['defaultDelivery'],
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
-                            decoration: const InputDecoration(
-                              labelText: 'Default Delivery Charge (\$)',
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: TextField(
-                            controller: ctl['phone'],
-                            keyboardType: TextInputType.phone,
-                            decoration: const InputDecoration(
-                              labelText: 'Restaurant Phone',
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: ctl['address'],
-                      decoration: const InputDecoration(
-                        labelText: 'Restaurant Address',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: ctl['menuUrl'],
-                      decoration: const InputDecoration(
-                        labelText: 'Live Menu Link (Google Sheet CSV)',
-                        hintText: 'Leave blank to use built-in offline menu',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Loaded dishes: ${menu.length} items (GST 9% incl.)',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Colors.black54,
-                          ),
-                        ),
-                        TextButton.icon(
-                          icon: const Icon(Icons.sync, size: 16),
-                          label: const Text('Reload Menu'),
-                          onPressed: () async {
-                            await save();
-                            setState(() {});
-                            if (c.mounted) {
-                              ScaffoldMessenger.of(c).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    'Menu reloaded (${menu.length} items)',
-                                  ),
-                                ),
-                              );
-                            }
-                          },
-                        ),
-                      ],
-                    ),
-                  ],
+              const SizedBox(height: 10),
+              TextField(
+                controller: csvCtl,
+                maxLines: 5,
+                decoration: const InputDecoration(
+                  labelText: 'Or Paste CSV Content Here',
+                  hintText:
+                      'id,category,subcategory,name,price,...\nM001,Hidang,Chicken,Ayam Goreng,4.5,,,,,,Yes,1',
+                  border: OutlineInputBorder(),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              icon: const Icon(Icons.save),
-              label: const Text('Save All Settings'),
-              onPressed: () async {
-                await save();
-                if (c.mounted) Navigator.pop(c);
-              },
-            ),
-          ],
+            ],
+          ),
         ),
-      );
+        actions: [
+          TextButton(
+            onPressed: () async {
+              final data = await Clipboard.getData('text/plain');
+              if (data?.text != null) {
+                csvCtl.text = data!.text!;
+              }
+            },
+            child: const Text('Paste Clipboard'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(minimumSize: const Size(100, 40)),
+            onPressed: () async {
+              String rawCsv = csvCtl.text.trim();
+              if (rawCsv.isEmpty && pathCtl.text.trim().isNotEmpty) {
+                try {
+                  rawCsv = await File(pathCtl.text.trim()).readAsString();
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('File read error: $e')),
+                    );
+                  }
+                  return;
+                }
+              }
+              if (rawCsv.isEmpty) return;
+              final rows = const CsvToListConverter(eol: '\n')
+                  .convert(rawCsv.replaceAll('\r', ''));
+              final parsed = rows
+                  .skip(1)
+                  .where((r) => r.length >= 11)
+                  .map((r) => Item(r))
+                  .where((i) => i.available)
+                  .toList();
+              if (parsed.isEmpty) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Invalid CSV: ensure at least 11 columns and available=Yes',
+                      ),
+                    ),
+                  );
+                }
+                return;
+              }
+              final p = await SharedPreferences.getInstance();
+              await p.setString('menuCache', rawCsv);
+              setState(() => menu = parsed);
+              if (ctx.mounted) Navigator.pop(ctx);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Successfully imported ${parsed.length} menu items from CSV!',
+                    ),
+                  ),
+                );
+              }
+            },
+            child: const Text('Import CSV'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext c) {
+    final sampleOrder = Order()
+      ..inv = 'INV-20261028-001'
+      ..name = 'Ahmad Razak'
+      ..mobile = '9123 4567'
+      ..mode = 'Catering'
+      ..pax = 30
+      ..table = '14 Jalan Pisang';
+    if (menu.isNotEmpty) {
+      sampleOrder.setQty(menu.first, 'Std', 2);
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('App & Printer Settings')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          // Section 1: LAN Thermal Printer Settings
+          Card(
+            color: brandLight.withValues(alpha: 0.45),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: brandGreen.withValues(alpha: 0.3)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.print, color: brandGreen),
+                      SizedBox(width: 8),
+                      Text(
+                        'LAN Thermal Receipt Printer',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: brandGreen,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: ctl['ip'],
+                          decoration: const InputDecoration(
+                            labelText: 'Printer IP Address',
+                            filled: true,
+                            fillColor: Colors.white,
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: ctl['port'],
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Port',
+                            filled: true,
+                            fillColor: Colors.white,
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    value: selectedCols,
+                    decoration: const InputDecoration(
+                      labelText: 'Paper Width (Characters per Line)',
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(),
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: '42',
+                        child: Text('80mm Standard (42 columns)'),
+                      ),
+                      DropdownMenuItem(
+                        value: '48',
+                        child: Text('80mm Wide Font B (48 columns)'),
+                      ),
+                      DropdownMenuItem(
+                        value: '32',
+                        child: Text('58mm Compact (32 columns)'),
+                      ),
+                    ],
+                    onChanged: (v) => setState(() => selectedCols = v ?? '42'),
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    activeColor: brandGreen,
+                    title: const Text(
+                      'Auto-Print Receipt on Order Confirm',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    subtitle: const Text(
+                      'Automatically send tax invoice to printer when confirming order',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                    value: autoPrint,
+                    onChanged: (v) => setState(() => autoPrint = v),
+                  ),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(46),
+                      backgroundColor: Colors.white,
+                    ),
+                    icon: const Icon(Icons.receipt),
+                    label: const Text('Save & Print Test Receipt'),
+                    onPressed: () async {
+                      await save();
+                      final e = await tryPrint(
+                        Order()
+                          ..name = 'TEST PRINT'
+                          ..inv = 'TEST-001'
+                          ..mode = 'Dine in'
+                          ..table = 'T-1',
+                      );
+                      if (c.mounted) {
+                        ScaffoldMessenger.of(c).showSnackBar(
+                          SnackBar(
+                            content: Text(e ?? 'Test receipt sent to printer'),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Section 2: Receipt Template & Logo Settings
+          Card(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: brandGreen.withValues(alpha: 0.3)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.receipt_long, color: brandGreen),
+                      SizedBox(width: 8),
+                      Text(
+                        'Receipt Template & Logo',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: brandGreen,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Container(
+                        width: 56,
+                        height: 56,
+                        decoration: BoxDecoration(
+                          color: brandGreen,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        alignment: Alignment.center,
+                        child: const Text(
+                          'LOGO',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          controller: ctl['logoUrl'],
+                          onChanged: (_) => setState(() {}),
+                          decoration: const InputDecoration(
+                            labelText: 'Logo Image URL or File Path',
+                            hintText: 'https://... or /storage/.../logo.png',
+                            isDense: true,
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    activeColor: brandGreen,
+                    title: const Text(
+                      'Show Brand Logo Header on Receipt & PDF',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    value: showLogo,
+                    onChanged: (v) {
+                      setState(() {
+                        showLogo = v;
+                        cfg['showLogo'] = v ? 'true' : 'false';
+                      });
+                    },
+                  ),
+                  TextField(
+                    controller: ctl['headerTagline'],
+                    onChanged: (v) => setState(() => cfg['headerTagline'] = v),
+                    decoration: const InputDecoration(
+                      labelText: 'Receipt Header Tagline',
+                      hintText: 'Traditional Nasi Padang & Catering',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: ctl['footerLine1'],
+                          onChanged: (v) =>
+                              setState(() => cfg['footerLine1'] = v),
+                          decoration: const InputDecoration(
+                            labelText: 'Footer Message Line 1',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: ctl['footerLine2'],
+                          onChanged: (v) =>
+                              setState(() => cfg['footerLine2'] = v),
+                          decoration: const InputDecoration(
+                            labelText: 'Footer Line 2 (e.g. PayNow UEN)',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Live Receipt Template Preview:',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: brandGreen,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      border: Border.all(color: Colors.grey.shade300),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      receiptLines(sampleOrder).map((e) => e.$1).join('\n'),
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Section 3: POS Menu CSV Import & Sync
+          Card(
+            color: brandLight.withValues(alpha: 0.35),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: brandGreen.withValues(alpha: 0.3)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.upload_file, color: brandGreen),
+                          SizedBox(width: 8),
+                          Text(
+                            'POS Menu CSV Import',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: brandGreen,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Chip(
+                        label: Text(
+                          '${menu.length} items active',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                          ),
+                        ),
+                        backgroundColor: brandGreen,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size.fromHeight(44),
+                          ),
+                          icon: const Icon(Icons.file_upload_outlined),
+                          label: const Text('Import CSV File / Paste'),
+                          onPressed: showCsvImportDialog,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(120, 44),
+                          backgroundColor: Colors.white,
+                        ),
+                        icon: const Icon(Icons.restore, size: 18),
+                        label: const Text('Reset Default'),
+                        onPressed: () async {
+                          final p = await SharedPreferences.getInstance();
+                          await p.remove('menuCache');
+                          ctl['menuUrl']!.clear();
+                          cfg['menuUrl'] = '';
+                          await saveCfg();
+                          await loadMenu();
+                          setState(() {});
+                          if (c.mounted) {
+                            ScaffoldMessenger.of(c).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Reset to built-in menu (${menu.length} items)',
+                                ),
+                              ),
+                            );
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: ctl['menuUrl'],
+                    decoration: InputDecoration(
+                      labelText: 'Or Sync from Google Sheet CSV URL',
+                      hintText: 'https://docs.google.com/spreadsheets/d/.../pub?output=csv',
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: const OutlineInputBorder(),
+                      suffixIcon: IconButton(
+                        tooltip: 'Sync URL Now',
+                        icon: const Icon(Icons.sync, color: brandGreen),
+                        onPressed: () async {
+                          await save();
+                          setState(() {});
+                          if (c.mounted) {
+                            ScaffoldMessenger.of(c).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Menu synced (${menu.length} items)',
+                                ),
+                              ),
+                            );
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Section 4: Company & Tax Invoice Settings
+          Card(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: Colors.grey.shade300),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.storefront, color: brandGreen),
+                      SizedBox(width: 8),
+                      Text(
+                        'Company & Tax Invoice Details',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: brandGreen,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: ctl['company'],
+                    onChanged: (v) => setState(() => cfg['company'] = v),
+                    decoration: const InputDecoration(
+                      labelText: 'Company Name',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: ctl['uen'],
+                          onChanged: (v) => setState(() => cfg['uen'] = v),
+                          decoration: const InputDecoration(
+                            labelText: 'UEN',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: ctl['gstNo'],
+                          onChanged: (v) => setState(() => cfg['gstNo'] = v),
+                          decoration: const InputDecoration(
+                            labelText: 'GST Reg. No.',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: ctl['defaultDelivery'],
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          decoration: const InputDecoration(
+                            labelText: 'Default Delivery Charge (\$)',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: ctl['phone'],
+                          onChanged: (v) => setState(() => cfg['phone'] = v),
+                          keyboardType: TextInputType.phone,
+                          decoration: const InputDecoration(
+                            labelText: 'Restaurant Phone',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: ctl['address'],
+                    onChanged: (v) => setState(() => cfg['address'] = v),
+                    decoration: const InputDecoration(
+                      labelText: 'Restaurant Address',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            icon: const Icon(Icons.save),
+            label: const Text('Save All Settings'),
+            onPressed: () async {
+              await save();
+              if (c.mounted) Navigator.pop(c);
+            },
+          ),
+        ],
+      ),
+    );
+  }
 }
